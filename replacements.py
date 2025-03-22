@@ -55,10 +55,10 @@ def sanitize_text(text):
 
     # Custom case-insensitive replacements for single letters (M and F)
     # Replace M/m with male and F/f with female in various contexts
-    text = re.sub(r'\((\d+)([Ff])\)', r'(\1 female)', text)  # Replace (34f) or (34F) with (34 female)
-    text = re.sub(r'\((\d+)([Mm])\)', r'(\1 male)', text)    # Replace (34m) or (34M) with (34 male)
-    text = re.sub(r'\(([Ff])\)', r'(female)', text)          # Replace (F) or (f) with (female)
-    text = re.sub(r'\(([Mm])\)', r'(male)', text)            # Replace (M) or (m) with (male)
+    text = re.sub(r'\((\d+)([Ff])\)', r'\1 female', text)  # Replace (34f) or (34F) with (34 female)
+    text = re.sub(r'\((\d+)([Mm])\)', r'\1 male', text)    # Replace (34m) or (34M) with (34 male)
+    text = re.sub(r'\(([Ff])\)', r'female', text)          # Replace (F) or (f) with (female)
+    text = re.sub(r'\(([Mm])\)', r'male', text)            # Replace (M) or (m) with (male)
     text = re.sub(r'(\d+)([Ff])', r'\1 female', text)        # Replace 27f or 27F with 27 female
     text = re.sub(r'(\d+)([Mm])', r'\1 male', text)          # Replace 30m or 30M with 30 male
     text = re.sub(r'\b([Ff])\b', 'female', text)             # Replace standalone F or f with female

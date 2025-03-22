@@ -1,121 +1,118 @@
 import os
 import csv
-from pydub import AudioSegment
+from force_alignment import *
+from dict import *
+import subprocess
 
-# Function to convert milliseconds to ASS time format (h:mm:ss.cc)
-def milliseconds_to_ass_time(milliseconds):
-    seconds, milliseconds = divmod(milliseconds, 1000)
-    minutes, seconds = divmod(seconds, 60)
-    hours, minutes = divmod(minutes, 60)
-    centiseconds = milliseconds // 10  # ASS uses centiseconds (1/100 of a second)
-    return f"{int(hours)}:{int(minutes):02}:{int(seconds):02}.{int(centiseconds):02}"
+def generate_subtitles(csv_path, voiceovers_folder, subtitles_folder):
+    """
+    Generate subtitles for each MP3 file in the Voiceovers folder.
+    Clean up temporary WAV and text files after subtitles are generated.
+    """
+    # Ensure subtitles folder exists
+    os.makedirs(subtitles_folder, exist_ok=True)
 
-# Function to split text into 1-3 word blocks
-def split_text_into_blocks(text):
-    words = text.split()  # Split text into individual words
-    blocks = []
-    current_block = []
+    # Get all MP3 files in the Voiceovers folder
+    mp3_files = [f for f in os.listdir(voiceovers_folder) if f.lower().endswith(".mp3")]
+    if not mp3_files:
+        print("❌ No MP3 files found in the Voiceovers folder.")
+        return
 
-    for word in words:
-        current_block.append(word)
-        # Create a block of 1-3 words
-        if len(current_block) >= 3 or word[-1] in ".!?":  # End block at punctuation or after 3 words
-            blocks.append(" ".join(current_block))
-            current_block = []
+    # Read the CSV file
+    with open(csv_path, "r", encoding="utf-8") as file:
+        reader = csv.reader(file)
+        header = next(reader)  # Skip header row
 
-    # Add any remaining words as a final block
-    if current_block:
-        blocks.append(" ".join(current_block))
-    return blocks
+        # Create a list of rows (each row is a list of columns)
+        csv_rows = list(reader)
 
-# Function to generate ASS content
-def generate_ass(text, audio_duration):
-    blocks = split_text_into_blocks(text)  # Split text into 1-3 word blocks
-    
-    # ASS file header
-    ass_header = """[Script Info]
-ScriptType: v4.00+
-PlayResX: 1920
-PlayResY: 1080
-Timer: 100.0000
-WrapStyle: 0
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial,60,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-"""
-
-    ass_content = [ass_header]
-    start_time = 0
-    duration_per_block = audio_duration // len(blocks)
-
-    for block in blocks:
-        end_time = start_time + duration_per_block
-        # ASS event line format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-        ass_line = f"Dialogue: 0,{milliseconds_to_ass_time(start_time)},{milliseconds_to_ass_time(end_time)},Default,,0,0,0,,{block}\n"
-        ass_content.append(ass_line)
-        start_time = end_time + 10  # Add a small gap between subtitles
-
-    return "".join(ass_content)
-
-# Directory containing mp3 files
-voiceovers_dir = "Voiceovers"
-
-# Check if the directory exists
-if not os.path.exists(voiceovers_dir):
-    print(f"Directory '{voiceovers_dir}' does not exist.")
-    exit()
-
-# Load the CSV file
-csv_file = "reddit_posts.csv"
-if not os.path.exists(csv_file):
-    print(f"CSV file '{csv_file}' does not exist.")
-    exit()
-
-# Read the CSV file into a list of rows
-with open(csv_file, mode='r', encoding='utf-8') as file:
-    reader = csv.reader(file)
-    rows = list(reader)  # Convert the CSV reader object to a list of rows
-
-# Process each mp3 file in the Voiceovers directory
-for mp3_file in os.listdir(voiceovers_dir):
-    if mp3_file.endswith(".mp3"):
-        file_number = mp3_file.split('.')[0]  # Extract the number from the filename
-        ass_file = os.path.join(voiceovers_dir, f"{file_number}.ass")
-
-        # Skip if ASS file already exists
-        if os.path.exists(ass_file):
-            print(f"ASS file for {mp3_file} already exists. Skipping.")
-            continue
-
-        # Convert file number to row index (CSV rows are 0-indexed, and the first row is the header)
+    # Process each MP3 file
+    for mp3_file in mp3_files:
+        # Extract row number from the MP3 file name (e.g., "1.mp3" -> 1)
         try:
-            row_index = int(file_number)  # File number corresponds to row number
-            if row_index < 1 or row_index >= len(rows):
-                print(f"Row {row_index} does not exist in the CSV for {mp3_file}. Skipping.")
-                continue
+            row_number = int(os.path.splitext(mp3_file)[0])
         except ValueError:
-            print(f"Invalid file number '{file_number}' in {mp3_file}. Skipping.")
+            print(f"❌ Invalid MP3 filename: {mp3_file}. Expected format: '1.mp3', '2.mp3', etc.")
             continue
 
-        # Get the text from columns B and C (index 1 and 2 in the row)
-        title = rows[row_index][1]  # Column B (Title)
-        post_content = rows[row_index][2]  # Column C (Post Content)
-        text = f"{title}. {post_content}"
+        # Skip if the row number is out of range
+        if row_number < 1 or row_number > len(csv_rows):
+            print(f"❌ Row {row_number} not found in the CSV file.")
+            continue
 
-        # Load the mp3 file to calculate its duration
-        mp3_path = os.path.join(voiceovers_dir, mp3_file)
-        audio = AudioSegment.from_mp3(mp3_path)
-        audio_duration = len(audio)  # Duration in milliseconds
+        # Get title and content from the CSV (row_number - 1 because Python lists are zero-indexed)
+        try:
+            # Ensure the row number maps correctly to the CSV row
+            csv_row = csv_rows[row_number - 2]  # row_number=1 -> csv_rows[0], row_number=2 -> csv_rows[1], etc.
+            title, content = csv_row[1], csv_row[2]  # Columns B and C
+        except IndexError:
+            print(f"❌ Row {row_number} in the CSV file is missing data.")
+            continue
 
-        # Generate ASS content
-        ass_content = generate_ass(text, audio_duration)
+        # Debugging: Print the row number and title being processed
+        print(f"Processing {mp3_file} (Row {row_number}): {title}")
 
-        # Save the ASS file
-        with open(ass_file, 'w', encoding='utf-8') as f:
-            f.write(ass_content)
+        # Define file paths
+        mp3_path = os.path.join(voiceovers_folder, mp3_file)
+        wav_path = os.path.join(voiceovers_folder, f"{row_number}.wav")
+        txt_path = os.path.join(voiceovers_folder, f"{row_number}.txt")
+        ass_path = os.path.join(subtitles_folder, f"{row_number}.ass")
 
-        print(f"Created ASS file for {mp3_file}.")
+        # Step 1: Convert MP3 to WAV for force alignment
+        convert_mp3_to_wav(mp3_path, wav_path)
+
+        # Step 2: Format the text and write it to the temporary text file
+        formatted_text = format_text(f"{title}\n\n{content}")  # Format the text
+        with open(txt_path, "w", encoding="utf-8") as txt_file:
+            txt_file.write(formatted_text)  # Write formatted text to the text file
+        
+
+        # Step 3: Perform force alignment
+        try:
+            bundle, waveform, labels, emission1 = class_label_prob(wav_path)
+            trellis, emission, tokens = trellis_algo(labels, formatted_text, emission1)  # Use formatted_text
+            path = backtrack(trellis, emission, tokens)
+            segments = merge_repeats(path, formatted_text)  # Use formatted_text
+            word_segments = merge_words(segments)
+
+            # Step 4: Generate timing list
+            timing_list = []
+            for i in range(len(word_segments)):
+                timing_list.append(display_segment(bundle, trellis, word_segments, waveform, i))
+
+            # Step 5: Convert timing list to ASS file
+            convert_timing_to_ass(timing_list, ass_path)
+            print(f"✅ Subtitles generated: {ass_path}")
+
+        except Exception as e:
+            print(f"❌ Error during force alignment for {mp3_file}: {e}")
+            continue
+
+        # Step 6: Clean up temporary WAV and text files
+        os.remove(wav_path)
+        os.remove(txt_path)
+        print(f"🧹 Cleaned up temporary files: {wav_path}, {txt_path}")
+
+def convert_mp3_to_wav(mp3_path, wav_path):
+    """
+    Convert MP3 to WAV (16kHz, 16-bit, mono) for force alignment.
+    """
+    command = [
+        'ffmpeg',
+        '-i', mp3_path,  # Input MP3 file
+        '-ac', '1',  # Mono
+        '-ar', '16000',  # 16kHz sample rate
+        '-sample_fmt', 's16',  # 16-bit
+        wav_path  # Output WAV file
+    ]
+    subprocess.run(command, check=True)
+    print(f"✅ Converted {mp3_path} to {wav_path}")
+
+if __name__ == "__main__":
+    # Define paths
+    csv_path = "reddit_posts.csv"  # Path to the CSV file
+    voiceovers_folder = "Voiceovers"  # Folder containing MP3 files
+    subtitles_folder = "Subtitles"  # Folder to save subtitle files
+
+    # Generate subtitles
+    generate_subtitles(csv_path, voiceovers_folder, subtitles_folder)
