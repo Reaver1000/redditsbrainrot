@@ -6,7 +6,7 @@ There is NO tts hooked up at the moment, you will need to manually do free trial
 
 Still to do 
 Working model! 
-Find a TSS that meets my criteria of free or good enough while being easy to install. Made it modular, can just be a standalone or api fed column B and C and save to the rows filename in voiceovers folder
+Find a TSS that meets my criteria of free or good enough while being easy to install. Made it modular, can just be a standalone or api fed column B and C and save to the rows id filename in voiceovers folder
 make a functional main that allows step by step choices in gui, or automates when run and left alone so it can be run on a timer ) 
 move the current local CSV online so automatic posting is possible ( n8n, make, postiz etc ) 
 
