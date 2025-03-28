@@ -8,7 +8,6 @@ TTS is currently set to Bark, but you can substitute whatever model you want, ju
 Installation
 
 Run Requirments and that should be 90% of the required modules until i can be bothered to recheck with a clean install. 
-
 you will need pytorch, so download from https://pytorch.org/get-started/locally/ and select your cuda
 You will also need the video editor https://ffmpeg.org/download.html#build-windows
 Run Setup and that should set up and prompt you for most of the info you need.
