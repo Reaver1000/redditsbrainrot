@@ -1,118 +1,145 @@
 import os
 import csv
-from force_alignment import *
-from dict import *
-import subprocess
+from pydub import AudioSegment
+
+def format_time(seconds):
+    """Format time in seconds to ASS subtitle format (h:mm:ss.cs)"""
+    milliseconds = int(seconds * 100)
+    hours = milliseconds // 360000
+    minutes = (milliseconds % 360000) // 6000
+    seconds = (milliseconds % 6000) // 100
+    centiseconds = milliseconds % 100
+    return f"{hours}:{minutes:02}:{seconds:02}.{centiseconds:02}"
+
+def split_into_bark_chunks(text, max_chunk_size=200):
+    """Split text into chunks using Bark's logic"""
+    if len(text) <= max_chunk_size:
+        return [text]
+
+    chunks = []
+    current_pos = 0
+    text_length = len(text)
+
+    while current_pos < text_length:
+        end_pos = min(current_pos + max_chunk_size, text_length)
+
+        if end_pos < text_length:
+            last_period = text.rfind('. ', current_pos, end_pos)
+            last_exclaim = text.rfind('! ', current_pos, end_pos)
+            last_question = text.rfind('? ', current_pos, end_pos)
+
+            sentence_end = max(last_period, last_exclaim, last_question)
+
+            if sentence_end != -1 and sentence_end > current_pos:
+                end_pos = sentence_end + 1
+            else:
+                last_space = text.rfind(' ', current_pos, end_pos)
+                if last_space != -1:
+                    end_pos = last_space + 1
+
+        chunk = text[current_pos:end_pos].strip()
+        if chunk:
+            chunks.append(chunk)
+        current_pos = end_pos
+
+    return chunks
+
+def split_chunk_into_words(chunk, max_words_per_line=2):
+    """Split a chunk into groups of 1-2 words"""
+    words = chunk.split()
+    word_groups = []
+    for i in range(0, len(words), max_words_per_line):
+        group = " ".join(words[i:i + max_words_per_line])
+        word_groups.append(group)
+    return word_groups
 
 def generate_subtitles(csv_path, voiceovers_folder, subtitles_folder):
-    """
-    Generate subtitles for each MP3 file in the Voiceovers folder.
-    Clean up temporary WAV and text files after subtitles are generated.
-    """
-    # Ensure subtitles folder exists
+    """Generate subtitles for each WAV file using Bark chunks and word-by-word display"""
     os.makedirs(subtitles_folder, exist_ok=True)
 
-    # Get all MP3 files in the Voiceovers folder
-    mp3_files = [f for f in os.listdir(voiceovers_folder) if f.lower().endswith(".mp3")]
-    if not mp3_files:
-        print("❌ No MP3 files found in the Voiceovers folder.")
+    wav_files = [f for f in os.listdir(voiceovers_folder) if f.lower().endswith('.wav')]
+    if not wav_files:
+        print("❌ No WAV files found in the Voiceovers folder.")
         return
 
-    # Read the CSV file
     with open(csv_path, "r", encoding="utf-8") as file:
-        reader = csv.reader(file)
-        header = next(reader)  # Skip header row
-
-        # Create a list of rows (each row is a list of columns)
+        reader = csv.DictReader(file)
         csv_rows = list(reader)
 
-    # Process each MP3 file
-    for mp3_file in mp3_files:
-        # Extract row number from the MP3 file name (e.g., "1.mp3" -> 1)
-        try:
-            row_number = int(os.path.splitext(mp3_file)[0])
-        except ValueError:
-            print(f"❌ Invalid MP3 filename: {mp3_file}. Expected format: '1.mp3', '2.mp3', etc.")
+    for wav_file in wav_files:
+        filename_without_ext = os.path.splitext(wav_file)[0]
+        matching_row = next((row for row in csv_rows if row['File Name'] == filename_without_ext), None)
+
+        if not matching_row:
+            print(f"❌ No matching row found for {wav_file}")
             continue
 
-        # Skip if the row number is out of range
-        if row_number < 1 or row_number > len(csv_rows):
-            print(f"❌ Row {row_number} not found in the CSV file.")
-            continue
+        title = matching_row['Title']
+        content = matching_row['Post Content']
+        full_text = f"{title}. {content}"
 
-        # Get title and content from the CSV (row_number - 1 because Python lists are zero-indexed)
+        print(f"Processing {wav_file}: {title}")
+
+        wav_path = os.path.join(voiceovers_folder, wav_file)
+        ass_path = os.path.join(subtitles_folder, f"{filename_without_ext}.ass")
+
         try:
-            # Ensure the row number maps correctly to the CSV row
-            csv_row = csv_rows[row_number - 2]  # row_number=1 -> csv_rows[0], row_number=2 -> csv_rows[1], etc.
-            title, content = csv_row[1], csv_row[2]  # Columns B and C
-        except IndexError:
-            print(f"❌ Row {row_number} in the CSV file is missing data.")
-            continue
+            # Get audio duration using pydub
+            audio = AudioSegment.from_file(wav_path)
+            duration = len(audio) / 1000.0  # Convert milliseconds to seconds
 
-        # Debugging: Print the row number and title being processed
-        print(f"Processing {mp3_file} (Row {row_number}): {title}")
+            # First split into Bark chunks
+            bark_chunks = split_into_bark_chunks(full_text)
 
-        # Define file paths
-        mp3_path = os.path.join(voiceovers_folder, mp3_file)
-        wav_path = os.path.join(voiceovers_folder, f"{row_number}.wav")
-        txt_path = os.path.join(voiceovers_folder, f"{row_number}.txt")
-        ass_path = os.path.join(subtitles_folder, f"{row_number}.ass")
+            # Calculate time per character for each Bark chunk
+            total_chars = sum(len(chunk) for chunk in bark_chunks)
+            time_per_char = duration / total_chars
 
-        # Step 1: Convert MP3 to WAV for force alignment
-        convert_mp3_to_wav(mp3_path, wav_path)
+            ass_header = """[Script Info]
+Title: Generated Subtitles
+ScriptType: v4.00+
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+YCbCr Matrix: TV.709
 
-        # Step 2: Format the text and write it to the temporary text file
-        formatted_text = format_text(f"{title}\n\n{content}")  # Format the text
-        with open(txt_path, "w", encoding="utf-8") as txt_file:
-            txt_file.write(formatted_text)  # Write formatted text to the text file
-        
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,150,150,0,0,1,3,3,5,10,10,10,1
 
-        # Step 3: Perform force alignment
-        try:
-            bundle, waveform, labels, emission1 = class_label_prob(wav_path)
-            trellis, emission, tokens = trellis_algo(labels, formatted_text, emission1)  # Use formatted_text
-            path = backtrack(trellis, emission, tokens)
-            segments = merge_repeats(path, formatted_text)  # Use formatted_text
-            word_segments = merge_words(segments)
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+            ass_content = ass_header
 
-            # Step 4: Generate timing list
-            timing_list = []
-            for i in range(len(word_segments)):
-                timing_list.append(display_segment(bundle, trellis, word_segments, waveform, i))
+            current_time = 0.0
+            for bark_chunk in bark_chunks:
+                # Calculate time for this Bark chunk
+                chunk_duration = len(bark_chunk) * time_per_char
 
-            # Step 5: Convert timing list to ASS file
-            convert_timing_to_ass(timing_list, ass_path)
+                # Split the Bark chunk into word groups
+                word_groups = split_chunk_into_words(bark_chunk)
+
+                # Calculate time per word group within this chunk
+                time_per_group = chunk_duration / len(word_groups)
+
+                # Generate subtitles for each word group
+                for word_group in word_groups:
+                    end_time = current_time + time_per_group
+                    ass_content += f"Dialogue: 0,{format_time(current_time)},{format_time(end_time)},Default,,0,0,0,,{word_group}\n"
+                    current_time = end_time
+
+            # Write the ASS file
+            with open(ass_path, 'w', encoding='utf-8-sig') as f:
+                f.write(ass_content)
+
             print(f"✅ Subtitles generated: {ass_path}")
 
         except Exception as e:
-            print(f"❌ Error during force alignment for {mp3_file}: {e}")
+            print(f"❌ Error during subtitle generation for {wav_file}: {str(e)}")
             continue
 
-        # Step 6: Clean up temporary WAV and text files
-        os.remove(wav_path)
-        os.remove(txt_path)
-        print(f"🧹 Cleaned up temporary files: {wav_path}, {txt_path}")
-
-def convert_mp3_to_wav(mp3_path, wav_path):
-    """
-    Convert MP3 to WAV (16kHz, 16-bit, mono) for force alignment.
-    """
-    command = [
-        'ffmpeg',
-        '-i', mp3_path,  # Input MP3 file
-        '-ac', '1',  # Mono
-        '-ar', '16000',  # 16kHz sample rate
-        '-sample_fmt', 's16',  # 16-bit
-        wav_path  # Output WAV file
-    ]
-    subprocess.run(command, check=True)
-    print(f"✅ Converted {mp3_path} to {wav_path}")
-
 if __name__ == "__main__":
-    # Define paths
-    csv_path = "reddit_posts.csv"  # Path to the CSV file
-    voiceovers_folder = "Voiceovers"  # Folder containing MP3 files
-    subtitles_folder = "Subtitles"  # Folder to save subtitle files
-
-    # Generate subtitles
+    csv_path = "reddit_posts.csv"
+    voiceovers_folder = "voiceovers"
+    subtitles_folder = "subtitles"
     generate_subtitles(csv_path, voiceovers_folder, subtitles_folder)

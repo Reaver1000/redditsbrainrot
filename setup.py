@@ -10,9 +10,26 @@ def get_input(prompt, default=None):
     value = input(prompt).strip()
     return value if value else default
 
+def get_subreddits():
+    """Get subreddits from user input"""
+    print("\n📚 Subreddit Configuration")
+    print("Recommended: AITAH+AmItheAsshole")
+    print("Format: subreddit1+subreddit2+subreddit3")
+    return get_input("Enter subreddits to scrape", "AITAH+AmItheAsshole")
+
+def get_content_limits():
+    """Get content length limits"""
+    print("\n📏 Content Length Configuration")
+    print("Recommended settings for TTS videos:")
+    min_chars = get_input("Minimum characters (recommended: 500)", "500")
+    optimal_chars = get_input("Optimal characters (recommended: 2000)", "2000")
+    max_chars = get_input("Maximum characters (recommended: 3000)", "3000")
+    return min_chars, optimal_chars, max_chars
+
 def setup_reddit():
     """Configure Reddit API credentials"""
     print("\n🔑 Reddit API Setup")
+    print("Get these from https://www.reddit.com/prefs/apps")
     client_id = get_input("Enter your Reddit Client ID")
     client_secret = get_input("Enter your Reddit Client Secret")
     user_agent = get_input("Enter your Reddit User Agent", "TTS Scraper (by u/YOUR_USERNAME)")
@@ -27,31 +44,68 @@ user_agent = {user_agent}
         f.write(praw_config)
     print("✅ Reddit credentials saved to praw.ini")
 
-def setup_local_csv():
-    """Configure local CSV file settings"""
-    print("\n📄 Local CSV Setup")
-    output_file = get_input("Enter the path for the output CSV file", "reddit_posts.csv")
+def setup_env_file():
+    """Configure all environment variables"""
+    print("\n⚙️ Configuration Setup")
     
-    # Save to .env
+    # Get user inputs
+    subreddits = get_subreddits()
+    min_chars, optimal_chars, max_chars = get_content_limits()
+    posts_per_sub = get_input("Number of posts per subreddit", "10")
+    
+    # Create comprehensive .env file
     env_config = f"""# Reddit Configuration
-SUBREDDITS=hfy+meta_reddit+AmItheAsshole
+SUBREDDITS={subreddits}
 MIN_COMMENTS=5
-POST_LIMIT=15
+POST_LIMIT=100
 MIN_SCORE=100
+OUTPUT_FILE=reddit_posts.csv
 
-# Local CSV Configuration
-OUTPUT_FILE={output_file}
+# Content Length Settings
+MIN_CHARS={min_chars}
+OPTIMAL_CHARS={optimal_chars}
+MAX_CHARS={max_chars}
+MIN_TITLE_CHARS=30
+MAX_TITLE_CHARS=200
+
+# Processing Settings
+POSTS_PER_SUBREDDIT={posts_per_sub}
 """
     with open(".env", "w") as f:
         f.write(env_config)
-    print("✅ Local CSV configuration saved to .env")
+    print("✅ Configuration saved to .env")
+
+def create_directories():
+    """Create necessary directories"""
+    directories = [
+        "BackgroundVideos",
+        "FinalVideos",
+        "Subtitles",
+        "Voiceovers"
+    ]
+    
+    print("\n📁 Creating directories...")
+    for directory in directories:
+        Path(directory).mkdir(exist_ok=True)
+        print(f"✅ Created {directory}/")
 
 def setup_project():
     """Main setup function"""
     print("🚀 Reddit Scraper Setup")
+    
+    # Create directories first
+    create_directories()
+    
+    # Setup configurations
     setup_reddit()
-    setup_local_csv()
-    print("\n🎉 Setup complete! You can now run the scraper.")
+    setup_env_file()
+    
+    print("\n🎉 Setup complete! Your environment is ready.")
+    print("\nNext steps:")
+    print("1. Add background videos to BackgroundVideos/")
+    print("2. Run the scraper to collect stories")
+    print("3. Add voiceovers to Voiceovers/")
+    print("4. Generate final videos")
 
 if __name__ == "__main__":
     setup_project()

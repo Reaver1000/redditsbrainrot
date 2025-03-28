@@ -1,174 +1,200 @@
 import subprocess
 import os
 import random
-import shutil  # For copying files
+import shutil
+from pathlib import Path
 
-def get_mp3_files(voiceovers_folder):
-    """
-    Get a list of MP3 files in the Voiceovers folder.
-    """
-    mp3_files = [f for f in os.listdir(voiceovers_folder) if f.lower().endswith(".mp3")]
-    return mp3_files
+def get_wav_files(folder):
+    return [f for f in os.listdir(folder) if f.lower().endswith('.wav')]
+
+def get_audio_duration(wav_path):
+    try:
+        cmd = [
+            'ffprobe', '-i', wav_path,
+            '-show_entries', 'format=duration',
+            '-v', 'quiet', '-of', 'csv=p=0'
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        return float(result.stdout.strip())
+    except Exception as e:
+        print(f"Error getting audio duration: {e}")
+        return None
 
 def get_random_background(background_folder):
-    """
-    Get a random background video from the BackgroundVideos folder.
-    """
-    background_files = [f for f in os.listdir(background_folder) if f.lower().endswith(".mp4")]
-    if not background_files:
-        raise FileNotFoundError("No background videos found in the BackgroundVideos folder.")
-    return random.choice(background_files)
-
-def get_audio_duration(audio_path):
-    """
-    Get the duration of an audio file using ffprobe.
-    """
-    command = [
-        'ffprobe',
-        '-v', 'error',
-        '-show_entries', 'format=duration',
-        '-of', 'default=noprint_wrappers=1:nokey=1',
-        audio_path
-    ]
-    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    return float(result.stdout.strip())
-
-def get_video_duration(video_path):
-    """
-    Get the duration of a video file using ffprobe.
-    """
-    command = [
-        'ffprobe',
-        '-v', 'error',
-        '-show_entries', 'format=duration',
-        '-of', 'default=noprint_wrappers=1:nokey=1',
-        video_path
-    ]
-    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    return float(result.stdout.strip())
+    video_files = [f for f in os.listdir(background_folder)
+                   if f.lower().endswith(('.mp4', '.mov', '.avi'))]
+    if not video_files:
+        raise FileNotFoundError("No video files found in background folder")
+    return random.choice(video_files)
 
 def trim_video(input_path, output_path, duration):
-    """
-    Extract a segment of the video starting at a random point.
-    """
-    # Get the duration of the background video
-    background_duration = get_video_duration(input_path)
-
-    # Calculate the maximum start time to ensure the segment fits
-    max_start_time = background_duration - duration
-    if max_start_time < 0:
-        raise ValueError(f"Background video is too short ({background_duration:.2f}s) to fit the MP3 ({duration:.2f}s).")
-
-    # Generate a random start time
-    start_time = random.uniform(0, max_start_time)
-    print(f"Extracting video segment from {start_time:.2f}s to {start_time + duration:.2f}s")
-
-    command = [
-        'ffmpeg',
-        '-i', input_path,
-        '-ss', str(start_time),
-        '-t', str(duration),
-        '-c', 'copy',
-        output_path
-    ]
-    subprocess.run(command, check=True)
-    print(f"✅ Extracted video segment saved: {output_path}")
-
-def add_subtitles_and_overlay_audio(video_path, audio_path, subtitles_path, output_path):
-    """
-    Add subtitles and overlay audio to the video.
-    """
-    # Copy the subtitle file to the main folder (temporarily)
-    temp_subtitles_path = os.path.basename(subtitles_path)  # e.g., "10.ass"
-    shutil.copy(subtitles_path, temp_subtitles_path)
-
-    # Copy the MP3 file to the main folder (temporarily)
-    temp_audio_path = os.path.basename(audio_path)  # e.g., "10.mp3"
-    shutil.copy(audio_path, temp_audio_path)
-
     try:
-        # Use the temporary subtitle and MP3 files in the main folder
-        command = [
-            'ffmpeg',
-            '-i', video_path,
-            '-i', temp_audio_path,  # Use the temporary MP3 file
-            '-vf', f"subtitles='{temp_subtitles_path}'",  # Use the temporary subtitle file
-            '-c:v', 'libx264',
-            '-map', '0:v',
-            '-map', '1:a',
-            '-c:a', 'aac',
-            '-strict', 'experimental',
-            '-shortest',
+        cmd = [
+            'ffprobe', '-i', input_path,
+            '-show_entries', 'format=duration',
+            '-v', 'quiet', '-of', 'csv=p=0'
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        video_duration = float(result.stdout.strip())
+
+        max_start = max(0, video_duration - duration)
+        start_time = random.uniform(0, max_start) if max_start > 0 else 0
+
+        print(f"Trimming video from {start_time:.2f}s for {duration:.2f}s duration")
+
+        cmd = [
+            'ffmpeg', '-i', input_path,
+            '-ss', str(start_time),
+            '-t', str(duration),
+            '-c', 'copy', '-y',
             output_path
         ]
-        subprocess.run(command, check=True)
-        print(f"✅ Final video saved: {output_path}")
-    finally:
-        # Clean up: Delete the temporary files
-        if os.path.exists(temp_subtitles_path):
-            os.remove(temp_subtitles_path)
-            print(f"🗑️ Deleted temporary subtitle file: {temp_subtitles_path}")
-        if os.path.exists(temp_audio_path):
-            os.remove(temp_audio_path)
-            print(f"🗑️ Deleted temporary MP3 file: {temp_audio_path}")
+        process = subprocess.run(cmd, capture_output=True, text=True)
+        if process.returncode != 0:
+            print(f"FFmpeg Error Output:\n{process.stderr}")
+            raise subprocess.CalledProcessError(process.returncode, cmd)
+
+        print("✓ Video trimming complete")
+
+    except Exception as e:
+        print(f"Error trimming video: {e}")
+        raise
 
 def process_videos(background_folder, voiceovers_folder, subtitles_folder, final_folder):
-    """
-    Process all MP3 files in the Voiceovers folder.
-    """
-    # Ensure final folder exists
     os.makedirs(final_folder, exist_ok=True)
+    os.makedirs("temp", exist_ok=True)
 
-    # Get list of MP3 files
-    mp3_files = get_mp3_files(voiceovers_folder)
-    if not mp3_files:
-        print("❌ No MP3 files found in the Voiceovers folder.")
+    wav_files = get_wav_files(voiceovers_folder)
+    if not wav_files:
+        print("No WAV files found in the Voiceovers folder.")
         return
 
-    # Process each MP3 file
-    for mp3_file in mp3_files:
-        # Define file paths
-        mp3_path = os.path.join(voiceovers_folder, mp3_file)  # MP3 file in Voiceovers folder
+    print(f"\nFound {len(wav_files)} WAV files to process.")
+    processed_count = 0
+    failed_count = 0
 
-        # Construct the subtitle file path
-        base_name = os.path.splitext(mp3_file)[0]  # e.g., "10" from "10.mp3"
-        subtitles_path = os.path.join(subtitles_folder, f"{base_name}.ass")  # e.g., "Subtitles\10.ass"
+    for wav_file in wav_files:
+        print(f"\n{'='*50}")
+        print(f"Processing: {wav_file}")
+        print(f"{'='*50}")
 
-        # Debugging: Print the subtitle path to verify
-        print(f"Looking for subtitles: {subtitles_path}")
+        base_name = os.path.splitext(wav_file)[0]
+        wav_path = os.path.join(voiceovers_folder, wav_file)
+        subtitle_src = os.path.join(subtitles_folder, f"{base_name}.ass")
+        subtitle_dest = os.path.join(os.getcwd(), f"{base_name}.ass")
+        output_path = os.path.join(final_folder, f"{base_name}.mp4")
+        temp_video_path = os.path.join("temp", "trimmed.mp4")
 
-        # Check if the subtitle file exists
-        if not os.path.exists(subtitles_path):
-            print(f"❌ Subtitle file not found: {subtitles_path}. Skipping this MP3 file.")
+        if not os.path.exists(subtitle_src):
+            print(f"Subtitle file not found: {subtitle_src}. Skipping.")
+            failed_count += 1
             continue
 
-        # Define the output video path
-        output_path = os.path.join(final_folder, f"{base_name}_final.mp4")
+        try:
+            # Copy subtitle to main folder
+            shutil.copy(subtitle_src, subtitle_dest)
+            print(f"✓ Copied subtitle to main folder: {subtitle_dest}")
 
-        # Get the duration of the MP3 file
-        duration = get_audio_duration(mp3_path)
-        print(f"Processing {mp3_file} (Duration: {duration:.2f} seconds)")
+            duration = get_audio_duration(wav_path)
+            if not duration:
+                print(f"Could not determine duration for {wav_file}. Skipping.")
+                failed_count += 1
+                continue
 
-        # Get a random background video
-        background_file = get_random_background(background_folder)
-        background_path = os.path.join(background_folder, background_file)
+            background_file = get_random_background(background_folder)
+            background_path = os.path.join(background_folder, background_file)
+            print(f"Selected background video: {background_file}")
 
-        # Extract a segment from the background video
-        trimmed_video = os.path.join(final_folder, "trimmed.mp4")
-        trim_video(background_path, trimmed_video, duration)
+            print("Trimming background video...")
+            trim_video(background_path, temp_video_path, duration)
 
-        # Add subtitles and overlay audio
-        add_subtitles_and_overlay_audio(trimmed_video, mp3_path, subtitles_path, output_path)
+            print("Adding subtitles and overlaying audio...")
+            cmd = [
+                'ffmpeg',
+                '-i', temp_video_path,
+                '-i', wav_path,
+                '-vf', f'ass={base_name}.ass',
+                '-c:v', 'libx264',
+                '-c:a', 'aac',
+                '-map', '0:v:0',
+                '-map', '1:a:0',
+                '-shortest',
+                '-y',
+                output_path
+            ]
+            process = subprocess.run(cmd, capture_output=True, text=True)
+            if process.returncode != 0:
+                print(f"FFmpeg Error Output:\n{process.stderr}")
+                raise subprocess.CalledProcessError(process.returncode, cmd)
 
-        # Clean up the trimmed video (optional)
-        os.remove(trimmed_video)
+            if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                print(f"✓ Successfully created: {output_path}")
+                processed_count += 1
+
+                os.remove(wav_path)
+                print(f"✓ Deleted WAV: {wav_path}")
+
+                os.remove(subtitle_dest)
+                print(f"✓ Deleted copied subtitle: {subtitle_dest}")
+
+        except Exception as e:
+            print(f"! Error processing {wav_file}: {e}")
+            failed_count += 1
+            if os.path.exists(temp_video_path):
+                try:
+                    os.remove(temp_video_path)
+                except:
+                    pass
+            if os.path.exists(subtitle_dest):
+                try:
+                    os.remove(subtitle_dest)
+                except:
+                    pass
+            continue
+
+        if os.path.exists(temp_video_path):
+            os.remove(temp_video_path)
+
+    if os.path.exists("temp"):
+        shutil.rmtree("temp")
+
+    print(f"\n{'='*50}")
+    print("Processing Complete!")
+    print(f"{'='*50}")
+    print(f"\nResults:")
+    print(f"✓ Successfully processed: {processed_count}")
+    print(f"✗ Failed: {failed_count}")
+
+def verify_folders():
+    required_folders = {
+        "BackgroundVideos": "background videos",
+        "Voiceovers": "WAV files",
+        "Subtitles": "subtitle files",
+        "FinalVideos": "output videos"
+    }
+
+    print("\nVerifying folders...")
+    for folder, description in required_folders.items():
+        if not os.path.exists(folder):
+            print(f"Creating folder for {description}: {folder}")
+            os.makedirs(folder)
+        elif not os.access(folder, os.W_OK):
+            raise PermissionError(f"No write access to {folder} folder")
+        else:
+            print(f"✓ {folder} folder exists and is accessible")
 
 if __name__ == "__main__":
-    # Define folder paths
-    background_folder = "BackgroundVideos"  # Folder for background videos
-    voiceovers_folder = "Voiceovers"  # Folder for MP3 files
-    subtitles_folder = "Subtitles"  # Folder for subtitle files
-    final_folder = "FinalVideos"  # Folder for final output videos
+    try:
+        print("\nVideo Processing Script")
+        print("="*50)
 
-    # Process all MP3 files
-    process_videos(background_folder, voiceovers_folder, subtitles_folder, final_folder)
+        background_folder = "BackgroundVideos"
+        voiceovers_folder = "Voiceovers"
+        subtitles_folder = "Subtitles"
+        final_folder = "FinalVideos"
+
+        verify_folders()
+        process_videos(background_folder, voiceovers_folder, subtitles_folder, final_folder)
+
+    except Exception as e:
+        print(f"\nFatal error: {e}")

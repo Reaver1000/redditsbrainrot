@@ -7,62 +7,77 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 def convert_to_mp4(input_path, output_path):
     """
-    Convert a video file to MP4 using FFmpeg.
+    Convert a video file to MP4 using FFmpeg, preserving audio.
     """
+    logging.info(f"🕒 Converting {os.path.basename(input_path)} to MP4. This may take some time...")
+    
     command = [
         "ffmpeg",
         "-i", input_path,  # Input file
         "-c:v", "libx264",  # Encode video with H.264
-        "-c:a", "aac",  # Encode audio with AAC
-        "-y",  # Overwrite output file if it exists
-        output_path  # Output file
+        "-c:a", "copy",     # Copy audio without re-encoding
+        "-y",               # Overwrite output file if it exists
+        output_path         # Output file
     ]
 
     try:
-        logging.info(f"🔄 Converting {input_path} to {output_path}")
         subprocess.run(command, check=True)
-        logging.info(f"✅ Successfully converted: {output_path}")
+        logging.info(f"✅ Successfully converted: {os.path.basename(output_path)}")
         return True
     except subprocess.CalledProcessError as e:
-        logging.error(f"❌ Error converting {input_path}: {e}")
+        logging.error(f"❌ Error converting {os.path.basename(input_path)}: {e}")
         return False
 
 def process_background_folder(background_folder):
     """
     Process all files in the background folder:
-    - Skip files that are already in MP4 format.
-    - Convert non-MP4 files to MP4.
+    - Convert non-MP4 files to MP4
+    - Delete original non-MP4 files
     """
     if not os.path.exists(background_folder):
         logging.error(f"❌ Background folder not found: {background_folder}")
         return
 
-    for filename in os.listdir(background_folder):
+    # Get list of non-MP4 files first
+    non_mp4_files = [
+        f for f in os.listdir(background_folder) 
+        if os.path.isfile(os.path.join(background_folder, f)) 
+        and not f.lower().endswith('.mp4')
+    ]
+
+    if not non_mp4_files:
+        logging.info("✅ No non-MP4 files found to convert.")
+        return
+
+    logging.info(f"🚀 Found {len(non_mp4_files)} files to convert. This process may take several minutes.")
+
+    converted_count = 0
+    for filename in non_mp4_files:
         input_path = os.path.join(background_folder, filename)
         
-        # Skip directories
-        if os.path.isdir(input_path):
-            continue
-
-        # Skip files that are already in MP4 format
-        if filename.lower().endswith(".mp4"):
-            logging.info(f"⏩ Skipping MP4 file: {filename}")
-            continue
-
         # Generate output path
         base_name = os.path.splitext(filename)[0]
         output_path = os.path.join(background_folder, f"{base_name}.mp4")
 
         # Convert non-MP4 files to MP4
-        convert_to_mp4(input_path, output_path)
+        if convert_to_mp4(input_path, output_path):
+            # Delete the original file
+            try:
+                os.remove(input_path)
+                logging.info(f"🗑️ Deleted original file: {filename}")
+                converted_count += 1
+            except Exception as e:
+                logging.error(f"❌ Error deleting {filename}: {e}")
 
-        # Optionally, delete the original file after conversion
-        # os.remove(input_path)
+    logging.info(f"✅ Conversion complete. {converted_count} files converted and original files removed.")
 
-if __name__ == "__main__":
+def main():
     # Set the background folder path
     background_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "BackgroundVideos")
     
     logging.info(f"🚀 Starting background video conversion in: {background_folder}")
     process_background_folder(background_folder)
-    logging.info("✅ Conversion process completed")
+    logging.info("🎉 Conversion process completed")
+
+if __name__ == "__main__":
+    main()
