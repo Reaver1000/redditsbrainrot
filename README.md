@@ -6,7 +6,9 @@ I have made this extremely modular, I want each building block working before i 
 TTS is currently set to Bark, but you can substitute whatever model you want, just modify the tts.py file to your liking. The Bark model has some issues with installation, but it is working without too many issues 
 
 Installation
+
 Run Requirments and that should be 90% of the required modules until i can be bothered to recheck with a clean install. 
+
 you will need pytorch, so download from https://pytorch.org/get-started/locally/ and select your cuda
 You will also need the video editor https://ffmpeg.org/download.html#build-windows
 Run Setup and that should set up and prompt you for most of the info you need.
